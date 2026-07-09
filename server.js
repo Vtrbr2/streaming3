@@ -23,6 +23,263 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const URL_BASE = 'https://www.pobreflixtv.gift';
 
+
+// ================================================================
+//                        🌐 COOKIES (compartilhado)
+// ================================================================
+
+let COOKIE_STRING = '';
+
+// ================================================================
+//                        📄 HTML BASE
+// ================================================================
+
+let HOME_HTML = '';
+// ================================================================
+// 🌐 CARREGAMENTO HOME
+// ================================================================
+async function carregarHome() {
+  try {
+    console.log('🌐 Carregando página inicial...');
+    const response = await axios.get(`${URL_BASE}/`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br, zstd',
+        'Cache-Control': 'max-age=0',
+        'Sec-CH-UA': '"Chromium";v="148", "Brave";v="148", "Not/A)Brand";v="99"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"Windows"',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Sec-GPC': '1',
+        'Priority': 'u=0,i'
+      },
+      timeout: 15000,
+      maxRedirects: 5,
+      validateStatus: status => status < 500
+    });
+
+    HOME_HTML = response.data || '';
+    const setCookie = response.headers['set-cookie'];
+    if (setCookie && setCookie.length > 0) {
+      const cookieArray = Array.isArray(setCookie) ? setCookie : [setCookie];
+      COOKIE_STRING = cookieArray.map(cookie => cookie.split(';')[0]).join('; ');
+      console.log('🍪 Cookies obtidos:', COOKIE_STRING);
+    } else {
+      COOKIE_STRING = '';
+      console.warn('⚠️ Nenhum cookie retornado pelo servidor.');
+    }
+    console.log(`📄 HTML carregado: ${HOME_HTML.length} bytes`);
+    console.log('✅ Página inicial carregada com sucesso!');
+  } catch (error) {
+    console.error('❌ Erro ao carregar home:', error.message);
+  }
+}
+
+carregarHome();
+setInterval(carregarHome, 6 * 60 * 60 * 1000);
+
+
+// ================================================================
+// 🏠 ENDPOINT: /api/banner-inicial (Banner principal da home)
+// ================================================================
+app.get('/api/banner-inicial', (req, res) => {
+  try {
+    // Verifica se o HTML da home foi carregado
+    if (!HOME_HTML) {
+      return res.status(503).json({
+        success: false,
+        error: 'Página inicial ainda não carregada. Aguarde alguns segundos.'
+      });
+    }
+
+    console.log('🏠 Extraindo banner inicial...');
+
+    const $ = cheerio.load(HOME_HTML);
+
+    // ===== EXTRAI O BANNER =====
+    const banner = {};
+
+    // 1. Pega o background-image do launcher
+    const launcherBg = $('#launcherBg');
+    const bgStyle = launcherBg.css('background-image') || '';
+    const bgMatch = bgStyle.match(/url\(["']?([^"']*)["']?\)/);
+    if (bgMatch) {
+      banner.background_image = bgMatch[1];
+    }
+
+    // 2. Pega o logo do filme/série
+    const movieLogo = $('.infos .movieLogo');
+    if (movieLogo.length) {
+      // Pega a logo de desktop (primeira)
+      const logoDesktop = movieLogo.filter('.ipsResponsive_hidePhone');
+      if (logoDesktop.length) {
+        banner.logo = logoDesktop.attr('src') || '';
+      } else {
+        banner.logo = movieLogo.first().attr('src') || '';
+      }
+    }
+
+    // 3. Pega o link do botão "Assistir"
+    const assistirBtn = $('.infos .coolButton.orange');
+    if (assistirBtn.length) {
+      banner.link_assistir = assistirBtn.attr('href') || '';
+      banner.titulo_botao = assistirBtn.text().trim() || 'Assistir';
+    }
+
+    // 4. Determina o tipo (filme ou série) pelo link
+    let tipo = 'filme';
+    if (banner.link_assistir && banner.link_assistir.includes('/series/')) {
+      tipo = 'serie';
+    } else if (banner.link_assistir && banner.link_assistir.includes('/filmes/')) {
+      tipo = 'filme';
+    }
+
+    // 5. Extrai o slug e ID do link
+    let slug = '';
+    let id = '';
+    if (banner.link_assistir) {
+      const slugMatch = banner.link_assistir.match(/\/([^/]+)-(\d+)\/$/);
+      if (slugMatch) {
+        slug = slugMatch[1];
+        id = slugMatch[2];
+      }
+    }
+
+    // 6. Pega o título do filme/série (do link ou do alt da imagem)
+    let titulo = '';
+    const tituloFromLink = banner.link_assistir ? banner.link_assistir.split('/').pop() : '';
+    if (tituloFromLink) {
+      const tituloMatch = tituloFromLink.match(/(.+?)-\d+$/);
+      if (tituloMatch) {
+        titulo = tituloMatch[1].replace(/-/g, ' ').trim();
+      }
+    }
+
+    // Se não achou, tenta do alt da imagem
+    if (!titulo) {
+      const logoAlt = $('.infos .movieLogo').attr('alt') || '';
+      if (logoAlt && !logoAlt.includes('Assistir')) {
+        titulo = logoAlt;
+      }
+    }
+
+    // ===== MONTA A RESPOSTA =====
+    const response = {
+      success: true,
+      banner: {
+        titulo: titulo,
+        tipo: tipo,
+        slug: slug,
+        id: id,
+        logo: banner.logo || null,
+        background_image: banner.background_image || null,
+        link_assistir: banner.link_assistir || null,
+        texto_botao: banner.titulo_botao || 'Assistir'
+      }
+    };
+
+    console.log(`✅ Banner extraído: "${titulo}" (${tipo})`);
+    res.json(response);
+
+  } catch (error) {
+    console.error('❌ Erro ao extrair banner:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao extrair banner inicial',
+      detalhe: error.message
+    });
+  }
+});
+
+// ================================================================
+// 🏠 ENDPOINT: /api/home/filmes (Filmes do slider da home)
+// ================================================================
+app.get('/api/home/filmes', (req, res) => {
+  try {
+    // Verifica se o HTML da home foi carregado
+    if (!HOME_HTML) {
+      return res.status(503).json({
+        success: false,
+        error: 'Página inicial ainda não carregada. Aguarde alguns segundos.'
+      });
+    }
+
+    console.log('🏠 Extraindo filmes da home...');
+
+    const $ = cheerio.load(HOME_HTML);
+    const filmes = [];
+
+    // ===== BUSCA O SLIDER DE FILMES (Lançamentos) =====
+    // O slider de filmes está dentro do painel 'releases_kw8a73lf1_html'
+    const filmesContainer = $('.vbPanel-container.releases_kw8a73lf1_html');
+    
+    if (filmesContainer.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Slider de filmes não encontrado na home'
+      });
+    }
+
+    // Pega todos os slides
+    filmesContainer.find('.swiper-slide.vbTabSliderItem').each((i, el) => {
+      const item = $(el);
+      const link = item.find('a.block').attr('href') || '';
+      const titulo = item.find('.info h3').text().trim() || '';
+      const ano = item.find('.info p').text().trim() || '';
+      const imagem = item.find('img').attr('src') || '';
+      
+      const tags = item.find('.top div');
+      const qualidade = tags.eq(0).text().trim() || 'HD';
+      const audio = tags.eq(1).text().trim() || '';
+
+      const idMatch = link.match(/-(\d+)\/$/);
+      const id = idMatch ? idMatch[1] : '';
+
+      const slugMatch = link.match(/\/([^/]+)-\d+\/$/);
+      const slug = slugMatch ? slugMatch[1] : '';
+
+      // Só adiciona se tiver título
+      if (titulo) {
+        filmes.push({
+          id: id,
+          slug: slug,
+          titulo: titulo,
+          ano: ano,
+          imagem: imagem,
+          qualidade: qualidade,
+          audio: audio,
+          link: link,
+          link_assistir: link
+        });
+      }
+    });
+
+    // ===== MONTA A RESPOSTA =====
+    const response = {
+      success: true,
+      total: filmes.length,
+      filmes: filmes
+    };
+
+    console.log(`✅ ${filmes.length} filmes extraídos da home`);
+    res.json(response);
+
+  } catch (error) {
+    console.error('❌ Erro ao extrair filmes da home:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao extrair filmes da home',
+      detalhe: error.message
+    });
+  }
+});
+
 // ================================================================
 // 🔍 ENDPOINT: /api/buscar (Busca automática - Live Search)
 // ================================================================
@@ -683,3 +940,276 @@ app.get('/api/series/stream', async (req, res) => {
     }
   }
 });
+// ================================================================
+// 🏠 ENDPOINT: /api/home/filmes/lancamentos (Lançamentos de filmes)
+// ================================================================
+app.get('/api/home/filmes/lancamentos', (req, res) => {
+  try {
+    if (!HOME_HTML) {
+      return res.status(503).json({ success: false, error: 'Página inicial ainda não carregada.' });
+    }
+
+    const $ = cheerio.load(HOME_HTML);
+    const filmes = [];
+
+    $('.vbPanel-container.releases_kw8a73lf1_html .swiper-slide.vbTabSliderItem').each((i, el) => {
+      const item = $(el);
+      const link = item.find('a.block').attr('href') || '';
+      const titulo = item.find('.info h3').text().trim() || '';
+      const ano = item.find('.info p').text().trim() || '';
+      const imagem = item.find('img').attr('src') || '';
+      const tags = item.find('.top div');
+      const qualidade = tags.eq(0).text().trim() || 'HD';
+      const audio = tags.eq(1).text().trim() || '';
+
+      const idMatch = link.match(/-(\d+)\/$/);
+      const id = idMatch ? idMatch[1] : '';
+      const slugMatch = link.match(/\/([^/]+)-\d+\/$/);
+      const slug = slugMatch ? slugMatch[1] : '';
+
+      if (titulo) {
+        filmes.push({ id, slug, titulo, ano, imagem, qualidade, audio, link, link_assistir: link });
+      }
+    });
+
+    res.json({ success: true, total: filmes.length, filmes });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ================================================================
+// 🏠 ENDPOINT: /api/home/filmes/recentes (Recentes de filmes)
+// ================================================================
+app.get('/api/home/filmes/recentes', (req, res) => {
+  try {
+    if (!HOME_HTML) {
+      return res.status(503).json({ success: false, error: 'Página inicial ainda não carregada.' });
+    }
+
+    const $ = cheerio.load(HOME_HTML);
+    const filmes = [];
+
+    $('.vbPanel-container.latest_kw8a73lf1_html .swiper-slide.vbTabSliderItem').each((i, el) => {
+      const item = $(el);
+      const link = item.find('a.block').attr('href') || '';
+      const titulo = item.find('.info h3').text().trim() || '';
+      const ano = item.find('.info p').text().trim() || '';
+      const imagem = item.find('img').attr('src') || '';
+      const tags = item.find('.top div');
+      const qualidade = tags.eq(0).text().trim() || 'HD';
+      const audio = tags.eq(1).text().trim() || '';
+
+      const idMatch = link.match(/-(\d+)\/$/);
+      const id = idMatch ? idMatch[1] : '';
+      const slugMatch = link.match(/\/([^/]+)-\d+\/$/);
+      const slug = slugMatch ? slugMatch[1] : '';
+
+      if (titulo) {
+        filmes.push({ id, slug, titulo, ano, imagem, qualidade, audio, link, link_assistir: link });
+      }
+    });
+
+    res.json({ success: true, total: filmes.length, filmes });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ================================================================
+// 🏠 ENDPOINT: /api/home/filmes/populares (Populares de filmes)
+// ================================================================
+app.get('/api/home/filmes/populares', (req, res) => {
+  try {
+    if (!HOME_HTML) {
+      return res.status(503).json({ success: false, error: 'Página inicial ainda não carregada.' });
+    }
+
+    const $ = cheerio.load(HOME_HTML);
+    const filmes = [];
+
+    // Populares é carregado via AJAX, então vem com .ipsLoading
+    // Tentamos pegar da estrutura se já estiver carregado
+    $('.vbPanel-container.mostviewed_kw8a73lf1_html .swiper-slide.vbTabSliderItem').each((i, el) => {
+      const item = $(el);
+      const link = item.find('a.block').attr('href') || '';
+      const titulo = item.find('.info h3').text().trim() || '';
+      const ano = item.find('.info p').text().trim() || '';
+      const imagem = item.find('img').attr('src') || '';
+      const tags = item.find('.top div');
+      const qualidade = tags.eq(0).text().trim() || 'HD';
+      const audio = tags.eq(1).text().trim() || '';
+
+      const idMatch = link.match(/-(\d+)\/$/);
+      const id = idMatch ? idMatch[1] : '';
+      const slugMatch = link.match(/\/([^/]+)-\d+\/$/);
+      const slug = slugMatch ? slugMatch[1] : '';
+
+      if (titulo) {
+        filmes.push({ id, slug, titulo, ano, imagem, qualidade, audio, link, link_assistir: link });
+      }
+    });
+
+    // Se não encontrou, retorna vazio (será carregado via AJAX)
+    res.json({ success: true, total: filmes.length, filmes, mensagem: filmes.length === 0 ? 'Populares carregados via AJAX' : undefined });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ================================================================
+// 📺 ENDPOINT: /api/home/series/novos-episodios (Novos episódios)
+// ================================================================
+app.get('/api/home/series/novos-episodios', (req, res) => {
+  try {
+    if (!HOME_HTML) {
+      return res.status(503).json({ success: false, error: 'Página inicial ainda não carregada.' });
+    }
+
+    const $ = cheerio.load(HOME_HTML);
+    const series = [];
+
+    $('.vbPanel-container.releases_n8tzjhutr_html .swiper-slide.vbTabSliderItem').each((i, el) => {
+      const item = $(el);
+      const link = item.find('a.block').attr('href') || '';
+      const titulo = item.find('.info h3').text().trim() || '';
+      const ano = item.find('.info p').text().trim() || '';
+      const imagem = item.find('img').attr('src') || '';
+      const tags = item.find('.top div');
+      const qualidade = tags.eq(0).text().trim() || 'HD';
+      const audio = tags.eq(1).text().trim() || '';
+
+      const idMatch = link.match(/-(\d+)\/$/);
+      const id = idMatch ? idMatch[1] : '';
+      const slugMatch = link.match(/\/([^/]+)-\d+\/$/);
+      const slug = slugMatch ? slugMatch[1] : '';
+
+      if (titulo) {
+        series.push({ id, slug, titulo, ano, imagem, qualidade, audio, link, link_assistir: link });
+      }
+    });
+
+    res.json({ success: true, total: series.length, series });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ================================================================
+// 📺 ENDPOINT: /api/home/series/recentes (Recentes de séries)
+// ================================================================
+app.get('/api/home/series/recentes', (req, res) => {
+  try {
+    if (!HOME_HTML) {
+      return res.status(503).json({ success: false, error: 'Página inicial ainda não carregada.' });
+    }
+
+    const $ = cheerio.load(HOME_HTML);
+    const series = [];
+
+    $('.vbPanel-container.latest_n8tzjhutr_html .swiper-slide.vbTabSliderItem').each((i, el) => {
+      const item = $(el);
+      const link = item.find('a.block').attr('href') || '';
+      const titulo = item.find('.info h3').text().trim() || '';
+      const ano = item.find('.info p').text().trim() || '';
+      const imagem = item.find('img').attr('src') || '';
+      const tags = item.find('.top div');
+      const qualidade = tags.eq(0).text().trim() || 'HD';
+      const audio = tags.eq(1).text().trim() || '';
+
+      const idMatch = link.match(/-(\d+)\/$/);
+      const id = idMatch ? idMatch[1] : '';
+      const slugMatch = link.match(/\/([^/]+)-\d+\/$/);
+      const slug = slugMatch ? slugMatch[1] : '';
+
+      if (titulo) {
+        series.push({ id, slug, titulo, ano, imagem, qualidade, audio, link, link_assistir: link });
+      }
+    });
+
+    res.json({ success: true, total: series.length, series });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ================================================================
+// 📺 ENDPOINT: /api/home/series/populares (Populares de séries)
+// ================================================================
+app.get('/api/home/series/populares', (req, res) => {
+  try {
+    if (!HOME_HTML) {
+      return res.status(503).json({ success: false, error: 'Página inicial ainda não carregada.' });
+    }
+
+    const $ = cheerio.load(HOME_HTML);
+    const series = [];
+
+    $('.vbPanel-container.mostviewed_n8tzjhutr_html .swiper-slide.vbTabSliderItem').each((i, el) => {
+      const item = $(el);
+      const link = item.find('a.block').attr('href') || '';
+      const titulo = item.find('.info h3').text().trim() || '';
+      const ano = item.find('.info p').text().trim() || '';
+      const imagem = item.find('img').attr('src') || '';
+      const tags = item.find('.top div');
+      const qualidade = tags.eq(0).text().trim() || 'HD';
+      const audio = tags.eq(1).text().trim() || '';
+
+      const idMatch = link.match(/-(\d+)\/$/);
+      const id = idMatch ? idMatch[1] : '';
+      const slugMatch = link.match(/\/([^/]+)-\d+\/$/);
+      const slug = slugMatch ? slugMatch[1] : '';
+
+      if (titulo) {
+        series.push({ id, slug, titulo, ano, imagem, qualidade, audio, link, link_assistir: link });
+      }
+    });
+
+    res.json({ success: true, total: series.length, series, mensagem: series.length === 0 ? 'Populares carregados via AJAX' : undefined });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ================================================================
+// 🔥 ENDPOINT: /api/home/em-alta (EM ALTA!)
+// ================================================================
+app.get('/api/home/em-alta', (req, res) => {
+  try {
+    if (!HOME_HTML) {
+      return res.status(503).json({ success: false, error: 'Página inicial ainda não carregada.' });
+    }
+
+    const $ = cheerio.load(HOME_HTML);
+    const itens = [];
+
+    // EM ALTA é carregado via AJAX, então tentamos pegar se já estiver carregado
+    $('.vbSection-body.nqwss1i8m_body .swiper-slide').each((i, el) => {
+      const item = $(el);
+      const link = item.find('a.block').attr('href') || '';
+      const titulo = item.find('.info h3').text().trim() || '';
+      const ano = item.find('.info p').text().trim() || '';
+      const imagem = item.find('img').attr('src') || '';
+      const tags = item.find('.top div');
+      const qualidade = tags.eq(0).text().trim() || 'HD';
+      const audio = tags.eq(1).text().trim() || '';
+
+      const idMatch = link.match(/-(\d+)\/$/);
+      const id = idMatch ? idMatch[1] : '';
+      const slugMatch = link.match(/\/([^/]+)-\d+\/$/);
+      const slug = slugMatch ? slugMatch[1] : '';
+
+      let tipo = 'filme';
+      if (link.includes('/series/')) tipo = 'serie';
+
+      if (titulo) {
+        itens.push({ id, slug, titulo, ano, imagem, qualidade, audio, tipo, link, link_assistir: link });
+      }
+    });
+
+    res.json({ success: true, total: itens.length, itens, mensagem: itens.length === 0 ? 'EM ALTA carregado via AJAX' : undefined });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
