@@ -277,19 +277,48 @@ app.get('/api/home/filmes/recentes', (req, res) => {
 });
 
 // ================================================================
-// 🏠 ENDPOINT: /api/home/filmes/populares
+// 🏠 ENDPOINT: /api/home/filmes/populares (via AJAX)
 // ================================================================
-app.get('/api/home/filmes/populares', (req, res) => {
+app.get('/api/home/filmes/populares', async (req, res) => {
   try {
     if (!HOME_HTML) {
       return res.status(503).json({ success: false, error: 'Página inicial ainda não carregada.' });
     }
 
-    const $ = cheerio.load(HOME_HTML);
-    const filmes = [];
+    console.log('📂 Buscando filmes populares via AJAX...');
 
-    $('.vbPanel-container.mostviewed_kw8a73lf1_html .swiper-slide.vbTabSliderItem').each((i, el) => {
-      const item = $(el);
+    const $ = cheerio.load(HOME_HTML);
+    const csrfKey = $('input[name="csrfKey"]').val() || '60fc5ee14cba1a3523680a0df9a76111';
+
+    // Faz a requisição POST para carregar os populares
+    const response = await axios.post(
+      `${URL_BASE}/?app=core&module=system&controller=plugins&do=vbtabslider`,
+      new URLSearchParams({
+        csrfKey: csrfKey,
+        type: 'filmes',
+        widgetKey: 'kw8a73lf1',
+        tab: 'mostviewed'
+      }),
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'Accept-Language': 'pt-BR,pt;q=0.9',
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Referer': `${URL_BASE}/`,
+          ...(COOKIE_STRING && { Cookie: COOKIE_STRING })
+        },
+        timeout: 15000
+      }
+    );
+
+    const htmlContent = response.data.content || '';
+    const $$ = cheerio.load(htmlContent);
+
+    const filmes = [];
+    $$('.swiper-slide.vbTabSliderItem').each((i, el) => {
+      const item = $$(el);
       const link = item.find('a.block').attr('href') || '';
       const titulo = item.find('.info h3').text().trim() || '';
       const ano = item.find('.info p').text().trim() || '';
@@ -312,9 +341,12 @@ app.get('/api/home/filmes/populares', (req, res) => {
       success: true,
       total: filmes.length,
       filmes,
-      mensagem: filmes.length === 0 ? 'Populares carregados via AJAX' : undefined
+      fonte: 'ajax'
     });
+
+    console.log(`✅ ${filmes.length} filmes populares encontrados`);
   } catch (error) {
+    console.error('❌ Erro ao buscar populares:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -396,19 +428,47 @@ app.get('/api/home/series/recentes', (req, res) => {
 });
 
 // ================================================================
-// 🏠 ENDPOINT: /api/home/series/populares
+// 🏠 ENDPOINT: /api/home/series/populares (via AJAX)
 // ================================================================
-app.get('/api/home/series/populares', (req, res) => {
+app.get('/api/home/series/populares', async (req, res) => {
   try {
     if (!HOME_HTML) {
       return res.status(503).json({ success: false, error: 'Página inicial ainda não carregada.' });
     }
 
-    const $ = cheerio.load(HOME_HTML);
-    const series = [];
+    console.log('📂 Buscando séries populares via AJAX...');
 
-    $('.vbPanel-container.mostviewed_n8tzjhutr_html .swiper-slide.vbTabSliderItem').each((i, el) => {
-      const item = $(el);
+    const $ = cheerio.load(HOME_HTML);
+    const csrfKey = $('input[name="csrfKey"]').val() || '60fc5ee14cba1a3523680a0df9a76111';
+
+    const response = await axios.post(
+      `${URL_BASE}/?app=core&module=system&controller=plugins&do=vbtabslider`,
+      new URLSearchParams({
+        csrfKey: csrfKey,
+        type: 'series',
+        widgetKey: 'n8tzjhutr',
+        tab: 'mostviewed'
+      }),
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'Accept-Language': 'pt-BR,pt;q=0.9',
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Referer': `${URL_BASE}/`,
+          ...(COOKIE_STRING && { Cookie: COOKIE_STRING })
+        },
+        timeout: 15000
+      }
+    );
+
+    const htmlContent = response.data.content || '';
+    const $$ = cheerio.load(htmlContent);
+
+    const series = [];
+    $$('.swiper-slide.vbTabSliderItem').each((i, el) => {
+      const item = $$(el);
       const link = item.find('a.block').attr('href') || '';
       const titulo = item.find('.info h3').text().trim() || '';
       const ano = item.find('.info p').text().trim() || '';
@@ -431,27 +491,55 @@ app.get('/api/home/series/populares', (req, res) => {
       success: true,
       total: series.length,
       series,
-      mensagem: series.length === 0 ? 'Populares carregados via AJAX' : undefined
+      fonte: 'ajax'
     });
+
+    console.log(`✅ ${series.length} séries populares encontradas`);
   } catch (error) {
+    console.error('❌ Erro ao buscar populares:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
 // ================================================================
-// 🏠 ENDPOINT: /api/home/em-alta
+// 🏠 ENDPOINT: /api/home/em-alta (via AJAX)
 // ================================================================
-app.get('/api/home/em-alta', (req, res) => {
+app.get('/api/home/em-alta', async (req, res) => {
   try {
     if (!HOME_HTML) {
       return res.status(503).json({ success: false, error: 'Página inicial ainda não carregada.' });
     }
 
-    const $ = cheerio.load(HOME_HTML);
-    const itens = [];
+    console.log('🔥 Buscando EM ALTA via AJAX...');
 
-    $('.vbSection-body.nqwss1i8m_body .swiper-slide').each((i, el) => {
-      const item = $(el);
+    const $ = cheerio.load(HOME_HTML);
+    const csrfKey = $('input[name="csrfKey"]').val() || '60fc5ee14cba1a3523680a0df9a76111';
+
+    const response = await axios.post(
+      `${URL_BASE}/?app=core&module=system&controller=plugins&do=vbsliderratingtrending`,
+      new URLSearchParams({
+        csrfKey: csrfKey,
+        widgetKey: 'nqwss1i8m'
+      }),
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'Accept-Language': 'pt-BR,pt;q=0.9',
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Referer': `${URL_BASE}/`,
+          ...(COOKIE_STRING && { Cookie: COOKIE_STRING })
+        },
+        timeout: 15000
+      }
+    );
+
+    const htmlContent = response.data.content || '';
+    const $$ = cheerio.load(htmlContent);
+
+    const itens = [];
+    $$('.swiper-slide').each((i, el) => {
+      const item = $$(el);
       const link = item.find('a.block').attr('href') || '';
       const titulo = item.find('.info h3').text().trim() || '';
       const ano = item.find('.info p').text().trim() || '';
@@ -477,13 +565,15 @@ app.get('/api/home/em-alta', (req, res) => {
       success: true,
       total: itens.length,
       itens,
-      mensagem: itens.length === 0 ? 'EM ALTA carregado via AJAX' : undefined
+      fonte: 'ajax'
     });
+
+    console.log(`✅ ${itens.length} itens EM ALTA encontrados`);
   } catch (error) {
+    console.error('❌ Erro ao buscar EM ALTA:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
 // ================================================================
 // 🏠 ENDPOINT: /api/home/categorias/filmes/:categoria
 // ================================================================
